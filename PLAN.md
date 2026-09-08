@@ -2,23 +2,30 @@
 
 ```
 fastapi-ai-service/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                 # FastAPI 应用入口
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── chat.py             # /ai/chat 路由
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py           # 环境变量配置
-│   │   └── ai_client.py        # AI 客户端封装（支持 DeepSeek 和 Ollama）
-│   └── models/
-│       ├── __init__.py
-│       └── schemas.py          # Pydantic 请求/响应模型
-├── .env                         # 环境变量（不提交 Git）
+├── .env                          # 环境变量（DEEPSEEK_API_KEY等）
 ├── .gitignore
-├── requirements.txt
-└── run.py                      # 启动脚本
+├── requirements.txt              # fastapi, uvicorn, python-dotenv, openai
+├── run.py                        # 启动脚本（可选）
+├── logs/                         # 运行时自动生成，存放日志文件
+│   └── app.log
+└── app/
+    ├── __init__.py
+    ├── main.py                   # 应用入口：注册中间件、异常处理器、路由
+    ├── api/
+    │   ├── __init__.py
+    │   └── chat.py               # /ai/chat 路由，调用 AI 客户端，主动抛出 BizException
+    ├── core/
+    │   ├── __init__.py
+    │   ├── config.py             # 配置类（您的版本，支持 DeepSeek/Ollama）
+    │   ├── ai_client.py          # AI 客户端封装（您的版本）
+    │   ├── exceptions.py         # 【新增】自定义业务异常 BizException
+    │   ├── logging_config.py     # 【新增】日志配置（控制台 + 滚动文件）
+    │   ├── exception_handlers.py # 【新增】全局异常处理器
+    │   └── middleware.py         # 【新增】日志拦截中间件
+    └── models/
+        ├── __init__.py
+        ├── schemas.py            # 请求/响应模型（ChatRequest, ChatResponse）
+        └── response.py           # 【新增】统一 API 响应模型 APIResponse
 ```
 
 # 项目启动
@@ -37,7 +44,6 @@ python app/main.py
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-
 启动成功后，服务运行在：`http://localhost:8000`
 
 # 接口文档地址

@@ -1,11 +1,25 @@
 from fastapi import FastAPI
 from app.api import chat
+from app.core.logging_config import setup_logging
+from app.core.exception_handlers import biz_exception_handler,global_exception_handler
+from app.core.exceptions import BizException
+from app.core.middleware import LoggingMiddleware
+
+# 初始化日志
+setup_logging()
 
 app = FastAPI(
     title="AI Microservice",
     version="1.0",
     description="一个简单的 AI 网关服务，集成 DeepSeek"
 )
+
+# 注册中间件（先于异常处理器，但异常最终会进入处理器）
+app.add_middleware(LoggingMiddleware)
+
+# 注册全局异常处理器
+app.add_exception_handler(BizException, biz_exception_handler)
+app.add_exception_handler(Exception, global_exception_handler)
 
 # 注册路由
 app.include_router(chat.router)
