@@ -46,6 +46,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 启动成功后，服务运行在：`http://localhost:8000`
 
+# 运行测试
+
+## 运行全部测试（含真实 AI 调用）
+```bash
+pytest tests/ -v -s
+```
+
+## 只跑快速测试（跳过 integration 标记）
+```bash
+pytest tests/ -v -s -m "not integration"
+```
+
 # 接口文档地址
 
 - **Swagger UI**：http://localhost:8000/docs

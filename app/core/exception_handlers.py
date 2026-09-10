@@ -12,7 +12,7 @@ async def biz_exception_handler(request: Request, exc: BizException):
 
     # 返回 JSON 响应
     return JSONResponse(
-        status_code = exc.code, ## 业务异常仍返回 200，由调用方通过 code 判断
+        status_code=200,  # 业务异常返回 HTTP 200，由调用方通过响应体中的 code 判断
         content = APIResponse(code = exc.code, message = exc.message, data = None).model_dump() # model_dump() 方法将模型实例转换为字典格式
     )
 
