@@ -1,7 +1,12 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+import json
+import logging
 from app.models.schemas import ChatRequest,ChatResponse
-from app.core.ai_client import chat_with_ai
+from app.core.ai_client import chat_with_ai, chat_with_ai_stream
 from app.core.exceptions import BizException
+
+logger = logging.getLogger(__name__)
 
 # 聊天路由
 router = APIRouter(prefix = "/ai",tags = ["AI"])
@@ -36,3 +41,39 @@ async def chat_endpoint(request: ChatRequest):
     reply = await chat_with_ai(request.prompt)
     # 将AI回复封装为响应模型返回
     return ChatResponse(reply=reply)
+
+@router.post("/chat/stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    """
+        聊天接口（流式响应）
+        以 SSE (Server-Sent Events) 格式逐步返回 AI 的回复。
+    """
+    # 1. 参数校验（同非流式，但错误需通过 SSE 事件下发）
+    if not request.prompt or not request.prompt.strip():
+        # 注意：流式接口无法使用全局异常处理器，需要在这里手动处理
+        async def error_stream():
+            yield f"data:{json.dumps({'type': 'error', 'code': 40001, 'message': 'prompt 不能为空'})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+
+    if "error" in request.prompt.lower():
+        async def error_stream():
+            yield f"data:{json.dumps({'type': 'error', 'code': 40002, 'message': '业务规则禁止：prompt 包含非法关键字 \'error\''})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+
+    # 2. 构建流式生成器
+    async def event_generator():
+        try:
+            async for delta in chat_with_ai_stream(request.prompt):
+                # 将每个 delta 包装成 SSE 事件
+                event_data = {"type": "message", "content": delta}
+                yield f"data:{json.dumps(event_data, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            # 流式过程中出现异常，无法更改 HTTP 状态码，只能发送错误事件
+            logger.error(f"流式 AI 调用失败: {e}", exc_info=True)
+            error_event = {"type": "error", "code": 500, "message": "AI 服务内部错误"}
+            yield f"data:{json.dumps(error_event, ensure_ascii=False)}\n\n"
+        finally:
+            # 发送结束标记
+            yield f"data:{json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

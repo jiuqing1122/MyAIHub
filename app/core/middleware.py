@@ -1,54 +1,73 @@
 import time
 import json
 import logging
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send, Message
 
-logger = logging.getLogger(__name__) # 获取当前模块的日志器
+logger = logging.getLogger(__name__)
 
-class LoggingMiddleware(BaseHTTPMiddleware):
-    """请求日志中间件：记录每个 HTTP 请求的方法、路径、请求体、状态码和耗时"""
-    async def dispatch(self, request: Request, call_next):
-        # 记录请求开始时间，用于计算处理耗时
+
+class LoggingMiddleware:
+    """
+    纯 ASGI 中间件，不继承 BaseHTTPMiddleware。
+    这样做是为了不缓冲 StreamingResponse，保证 SSE 真正流式。
+    """
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        # 只处理 HTTP 请求（跳过 lifespan、websocket）
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # 跳过 CORS 预检，避免日志噪音
+        if scope["method"] == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
         start_time = time.time()
-        # 获取请求方法（GET/POST/PUT/DELETE 等）
-        method = request.method
-        # 获取请求路径（如 /api/v1/chat），不含查询参数
-        path = request.url.path
+        method = scope["method"]
+        path = scope["path"]
 
-        # 读取请求体（缓存以便后续路由读取）
-        body = await request.body()
-        request._body = body
+        # 缓存请求体，让下游路由仍能读到
+        body_chunks = []
 
-        # 脱敏处理
-        log_body = None
-        #如果请求体不为空
-        if body:
-            try:
-                # 将请求体 bytes 解析为 JSON 字典，便于按字段名进行脱敏处理
-                json_body = json.loads(body.decode('utf-8'))
-                # 如果请求体中包含 "prompt" 字段且为字符串类型，则进行长度截断
-                if "prompt" in json_body and isinstance(json_body["prompt"], str):
-                    prompt = json_body["prompt"]
-                    if len(prompt) > 50:
-                        # 截断过长的 prompt，保留前 50 个字符并追加截断标记
-                        json_body["prompt"] = prompt[:50] + "...(truncated)"
-                # 将脱敏后的字典重新序列化为 JSON 字符串（ensure_ascii=False 保证中文可读）
-                log_body = json.dumps(json_body, ensure_ascii=False)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                # 解析失败（非 JSON 格式或二进制数据），使用占位符代替
-                log_body = "[非JSON或二进制数据]"
-        else:
-            # 请求体为空，使用占位符标记
-            log_body = "[空请求体]"
+        async def wrapped_receive() -> Message:
+            message = await receive()
+            if message["type"] == "http.request":
+                body_chunks.append(message.get("body", b""))
+            return message
 
-        # 处理请求
-        response = await call_next(request)
-        # 计算耗时
-        process_time_ms = (time.time() - start_time) * 1000
-        logger.info(
-            f"{method} {path} | 请求体: {log_body} | "
-            f"状态码: {response.status_code} | 耗时: {process_time_ms:.2f}ms"
-        )
+        # 拦截响应头，用于记录状态码。注意：不做任何缓冲，立即转发
+        status_holder = {"status": None}
 
-        return response
+        async def wrapped_send(message: Message):
+            if message["type"] == "http.response.start":
+                status_holder["status"] = message["status"]
+            await send(message)  # 立即转发，不缓冲 —— 这就是流式的关键
+
+        try:
+            await self.app(scope, wrapped_receive, wrapped_send)
+        finally:
+            elapsed_ms = (time.time() - start_time) * 1000
+            raw_body = b"".join(body_chunks)
+            log_body = self._desensitize(raw_body)
+            logger.info(
+                f"{method} {path} | 请求体: {log_body} | "
+                f"状态码: {status_holder['status']} | 耗时: {elapsed_ms:.2f}ms"
+            )
+
+    @staticmethod
+    def _desensitize(body: bytes) -> str:
+        if not body:
+            return "[空请求体]"
+        try:
+            json_body = json.loads(body.decode("utf-8"))
+            if "prompt" in json_body and isinstance(json_body["prompt"], str):
+                prompt = json_body["prompt"]
+                if len(prompt) > 50:
+                    json_body["prompt"] = prompt[:50] + "...(truncated)"
+            return json.dumps(json_body, ensure_ascii=False)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return "[非JSON或二进制数据]"

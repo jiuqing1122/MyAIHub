@@ -4,6 +4,7 @@ from app.core.logging_config import setup_logging
 from app.core.exception_handlers import biz_exception_handler,global_exception_handler
 from app.core.exceptions import BizException
 from app.core.middleware import LoggingMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 
 # 初始化日志
 setup_logging()
@@ -16,6 +17,15 @@ app = FastAPI(
 
 # 注册中间件（先于异常处理器，但异常最终会进入处理器）
 app.add_middleware(LoggingMiddleware)
+
+# 注册 CORS 中间件，解决跨域问题
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],           # 开发阶段允许所有源；生产应改为具体域名
+    allow_credentials=False,       # 与 allow_origins=["*"] 配合必须为 False
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 注册全局异常处理器
 app.add_exception_handler(BizException, biz_exception_handler)

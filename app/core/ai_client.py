@@ -31,3 +31,23 @@ async def chat_with_ai(prompt: str) -> str:
     )
     # 提取回复内容
     return response.choices[0].message.content
+
+async def chat_with_ai_stream(prompt: str):
+    """
+    调用 AI 流式聊天补全接口（支持 DeepSeek 和 Ollama）
+    :param prompt: 用户输入
+    :yield: 逐步返回的 AI 回复文本片段 (delta)
+    """
+    # 调用 OpenAI 兼容接口，关键参数 stream=True
+    stream = await client.chat.completions.create(
+        model=current_model,
+        messages=[{"role": "user", "content": prompt}],
+        stream=True,  # 开启流式
+    )
+
+    # 异步迭代响应块
+    async for chunk in stream:
+        # 提取增量内容，注意：chunk.choices[0].delta.content 可能为 None
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
